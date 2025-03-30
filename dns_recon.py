@@ -17,6 +17,7 @@ Features:
 - Automated reporting and visualization
 
 Usage:
+    python dns_recon.py example.com
     python dns_recon.py --domain example.com
     python dns_recon.py --ip 192.168.1.1
     python dns_recon.py --range 192.168.1.0/24
@@ -116,6 +117,11 @@ def save_results(results, output, domain=None, ip=None, ip_range=None, dns_serve
 def parse_arguments():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(description="DNS Reconnaissance Tool")
+    
+    # Add a positional argument for domain
+    parser.add_argument("domain", nargs="?", help="Target domain (positional argument)")
+    
+    # Keep all the existing named arguments
     parser.add_argument("--domain", "-d", help="Target domain")
     parser.add_argument("--ip", "-i", help="Target IP address for reverse lookup")
     parser.add_argument("--range", "-r", help="IP range in CIDR notation (e.g., 192.168.1.0/24)")
@@ -129,14 +135,19 @@ def parse_arguments():
     
     args = parser.parse_args()
     
+    # If positional domain is provided but --domain is not, use the positional one
+    if args.domain and not args.domain:
+        args.domain = args.domain
+    
     # Validate that at least one target is specified
     if not (args.domain or args.ip or args.range):
-        parser.error("At least one target (--domain, --ip, or --range) must be specified")
+        parser.error("At least one target (domain, --domain, --ip, or --range) must be specified")
     
     return args
 
 # Main DNS class
 class DNSRecon:
+    # ... keep existing code (DNSRecon class definition, class methods)
     def __init__(self, domain=None, ip=None, ip_range=None, dns_servers=None, 
                  timeout=5, threads=10, verbose=False, output=None, 
                  subdomains=None, history=False):
@@ -593,8 +604,11 @@ def main():
     args = parse_arguments()
     
     try:
+        # Determine the domain from either positional or named argument
+        domain = args.domain
+        
         recon = DNSRecon(
-            domain=args.domain,
+            domain=domain,
             ip=args.ip,
             ip_range=args.range,
             dns_servers=args.server,
@@ -615,3 +629,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
