@@ -27,25 +27,49 @@ Requirements:
     - ipaddress
 """
 
+import sys
+import os
 import argparse
-import concurrent.futures
-import dns.name
-import dns.query
-import dns.resolver
-import dns.reversename
-import dns.zone
-import ipaddress
 import json
 import socket
-import sys
+import concurrent.futures
 import time
 from collections import defaultdict
 from datetime import datetime
+import ipaddress
 
-# Configure DNS resolver
-dns_resolver = dns.resolver.Resolver()
+# Check dependencies
+def check_dependencies():
+    """Check if required dependencies are installed."""
+    try:
+        import dns.name
+        import dns.query
+        import dns.resolver
+        import dns.reversename
+        import dns.zone
+    except ImportError:
+        print("Error: Required package 'dnspython' is not installed.")
+        print("\nTo install the required package, run:")
+        print("    pip install dnspython")
+        print("\nOn Windows:")
+        print("    python -m pip install dnspython")
+        print("\nOn Linux/MacOS:")
+        print("    pip3 install dnspython")
+        sys.exit(1)
 
-# Default DNS servers (can be overridden via command line)
+    try:
+        import ipaddress
+    except ImportError:
+        print("Error: Required package 'ipaddress' is not installed.")
+        print("\nTo install the required package, run:")
+        print("    pip install ipaddress")
+        print("\nOn Windows:")
+        print("    python -m pip install ipaddress")
+        print("\nOn Linux/MacOS:")
+        print("    pip3 install ipaddress")
+        sys.exit(1)
+
+# Constants
 DEFAULT_DNS_SERVERS = [
     '8.8.8.8',       # Google
     '1.1.1.1',       # Cloudflare
@@ -65,6 +89,53 @@ COMMON_SUBDOMAINS = [
     'portal', 'ssh', 'git', 'cdn', 'cloud', 'support', 'web'
 ]
 
+# Utility functions
+def save_results(results, output, domain=None, ip=None, ip_range=None, dns_servers=None):
+    """Save results to a file."""
+    try:
+        with open(output, 'w') as f:
+            # Add metadata
+            result_data = {
+                'metadata': {
+                    'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                    'target_domain': domain,
+                    'target_ip': ip,
+                    'target_range': ip_range,
+                    'dns_servers': dns_servers
+                },
+                'results': results
+            }
+            
+            json.dump(result_data, f, indent=2)
+            
+        print(f"Results saved to {output}")
+    except Exception as e:
+        print(f"Error saving results: {e}")
+
+# CLI arguments parsing
+def parse_arguments():
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(description="DNS Reconnaissance Tool")
+    parser.add_argument("--domain", "-d", help="Target domain")
+    parser.add_argument("--ip", "-i", help="Target IP address for reverse lookup")
+    parser.add_argument("--range", "-r", help="IP range in CIDR notation (e.g., 192.168.1.0/24)")
+    parser.add_argument("--server", "-s", action="append", help="DNS server to use (can be specified multiple times)")
+    parser.add_argument("--timeout", "-t", type=int, default=5, help="Timeout for DNS queries in seconds")
+    parser.add_argument("--threads", "-n", type=int, default=10, help="Number of threads for concurrent queries")
+    parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose output")
+    parser.add_argument("--output", "-o", help="Output file path (JSON format)")
+    parser.add_argument("--subdomains", "-w", help="Path to subdomain wordlist file")
+    parser.add_argument("--history", action="store_true", help="Attempt to retrieve historical DNS records")
+    
+    args = parser.parse_args()
+    
+    # Validate that at least one target is specified
+    if not (args.domain or args.ip or args.range):
+        parser.error("At least one target (--domain, --ip, or --range) must be specified")
+    
+    return args
+
+# Main DNS class
 class DNSRecon:
     def __init__(self, domain=None, ip=None, ip_range=None, dns_servers=None, 
                  timeout=5, threads=10, verbose=False, output=None, 
@@ -84,6 +155,13 @@ class DNSRecon:
             subdomains (str): Path to subdomain wordlist file
             history (bool): Retrieve historical DNS records if available
         """
+        # Import DNS modules here to ensure dependencies are checked first
+        import dns.name
+        import dns.query
+        import dns.resolver
+        import dns.reversename
+        import dns.zone
+        
         self.domain = domain
         self.ip = ip
         self.ip_range = ip_range
@@ -104,9 +182,10 @@ class DNSRecon:
         }
         
         # Configure resolver
-        dns_resolver.timeout = self.timeout
-        dns_resolver.lifetime = self.timeout
-        dns_resolver.nameservers = [self.dns_servers[0]]  # Primary DNS server
+        self.resolver = dns.resolver.Resolver()
+        self.resolver.timeout = self.timeout
+        self.resolver.lifetime = self.timeout
+        self.resolver.nameservers = [self.dns_servers[0]]  # Primary DNS server
     
     def run(self):
         """
@@ -159,7 +238,14 @@ class DNSRecon:
         print(f"\nReconnaissance completed in {duration:.2f} seconds")
         
         if self.output:
-            self._save_results()
+            save_results(
+                self.results, 
+                self.output, 
+                domain=self.domain,
+                ip=self.ip,
+                ip_range=self.ip_range,
+                dns_servers=self.dns_servers
+            )
         
         return self.results
     
@@ -177,14 +263,14 @@ class DNSRecon:
         try:
             if record_type == 'DMARC':
                 # DMARC records are stored as TXT records at _dmarc.domain
-                answers = dns_resolver.resolve(f'_dmarc.{domain}', 'TXT')
+                answers = self.resolver.resolve(f'_dmarc.{domain}', 'TXT')
             elif record_type == 'SPF':
                 # SPF records are stored as TXT records
-                answers = dns_resolver.resolve(domain, 'TXT')
+                answers = self.resolver.resolve(domain, 'TXT')
                 # Filter for SPF records
                 return [str(rdata).strip('"') for rdata in answers if 'spf' in str(rdata).lower()]
             else:
-                answers = dns_resolver.resolve(domain, record_type)
+                answers = self.resolver.resolve(domain, record_type)
                 
             if record_type == 'A' or record_type == 'AAAA':
                 return [rdata.address for rdata in answers]
@@ -397,7 +483,7 @@ class DNSRecon:
             str: IP address(es) if resolved, None otherwise
         """
         try:
-            answers = dns_resolver.resolve(subdomain, 'A')
+            answers = self.resolver.resolve(subdomain, 'A')
             return ', '.join(rdata.address for rdata in answers)
         except Exception:
             return None
@@ -414,7 +500,7 @@ class DNSRecon:
         """
         try:
             reverse_name = dns.reversename.from_address(ip)
-            answers = dns_resolver.resolve(reverse_name, 'PTR')
+            answers = self.resolver.resolve(reverse_name, 'PTR')
             hostnames = [str(rdata).rstrip('.') for rdata in answers]
             
             if hostnames:
@@ -487,7 +573,7 @@ class DNSRecon:
         """
         try:
             reverse_name = dns.reversename.from_address(ip)
-            answers = dns_resolver.resolve(reverse_name, 'PTR')
+            answers = self.resolver.resolve(reverse_name, 'PTR')
             hostnames = [str(rdata).rstrip('.') for rdata in answers]
             
             if hostnames:
@@ -498,47 +584,13 @@ class DNSRecon:
             pass
         
         return []
-    
-    def _save_results(self):
-        """Save results to a file."""
-        try:
-            with open(self.output, 'w') as f:
-                # Add metadata
-                result_data = {
-                    'metadata': {
-                        'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                        'target_domain': self.domain,
-                        'target_ip': self.ip,
-                        'target_range': self.ip_range,
-                        'dns_servers': self.dns_servers
-                    },
-                    'results': self.results
-                }
-                
-                json.dump(result_data, f, indent=2)
-                
-            print(f"Results saved to {self.output}")
-        except Exception as e:
-            print(f"Error saving results: {e}")
 
 def main():
-    parser = argparse.ArgumentParser(description="DNS Reconnaissance Tool")
-    parser.add_argument("--domain", "-d", help="Target domain")
-    parser.add_argument("--ip", "-i", help="Target IP address for reverse lookup")
-    parser.add_argument("--range", "-r", help="IP range in CIDR notation (e.g., 192.168.1.0/24)")
-    parser.add_argument("--server", "-s", action="append", help="DNS server to use (can be specified multiple times)")
-    parser.add_argument("--timeout", "-t", type=int, default=5, help="Timeout for DNS queries in seconds")
-    parser.add_argument("--threads", "-n", type=int, default=10, help="Number of threads for concurrent queries")
-    parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose output")
-    parser.add_argument("--output", "-o", help="Output file path (JSON format)")
-    parser.add_argument("--subdomains", "-w", help="Path to subdomain wordlist file")
-    parser.add_argument("--history", action="store_true", help="Attempt to retrieve historical DNS records")
+    # Check dependencies first
+    check_dependencies()
     
-    args = parser.parse_args()
-    
-    # Validate that at least one target is specified
-    if not (args.domain or args.ip or args.range):
-        parser.error("At least one target (--domain, --ip, or --range) must be specified")
+    # Parse command line arguments
+    args = parse_arguments()
     
     try:
         recon = DNSRecon(
