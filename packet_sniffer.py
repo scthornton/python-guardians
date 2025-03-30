@@ -31,7 +31,12 @@ import signal
 import sys
 import time
 import platform
+import tempfile
 from collections import Counter, defaultdict
+
+# Configure Scapy to use a temp directory for cache to avoid permission issues
+os.environ['SCAPY_TEMP'] = tempfile.gettempdir()
+os.environ['SCAPY_CACHE_DIR'] = os.path.join(tempfile.gettempdir(), 'scapy_cache')
 
 try:
     from scapy.all import (
