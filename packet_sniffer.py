@@ -74,8 +74,6 @@ if not is_admin():
     print("Warning: This script should be run with administrator privileges for full functionality.")
     print("Some packet capture features may be limited.")
 
-# ... keep existing code (PacketSniffer class, get_available_interfaces function, and main function)
-
 class PacketSniffer:
     def __init__(self, interface=None, packet_filter=None, count=0, 
                  output_pcap=None, read_pcap=None, verbose=1):
