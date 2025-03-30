@@ -1,4 +1,3 @@
-
 #!/usr/bin/env python3
 """
 Subdomain Enumeration Tool - Discover subdomains of a target domain
@@ -319,7 +318,8 @@ class SubdomainEnumerator:
             f"https://search.yahoo.com/search?p=site%3A*.{self.domain}&n=100"
         ]
         
-        subdomain_pattern = re.compile(f'([a-zA-Z0-9_-]+\.{re.escape(self.domain)})')
+        # Fix the invalid escape sequence by properly escaping the dot
+        subdomain_pattern = re.compile(f'([a-zA-Z0-9_-]+\\.{re.escape(self.domain)})')
         
         for url in search_urls:
             try:
